@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WebGIS Batas Administrasi & Jalan Bandung</title>
+
+  <!-- Leaflet CSS -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  />
+
+  <style>
+    html, body, #map {
+      height: 100%;
+      width: 100%;
+      margin: 0;
+      padding: 0;
+      font-family: Arial, sans-serif;
+    }
+
+    /* Legend di kiri bawah */
+    .legend-box {
+      background: rgba(255, 255, 255, 0.95);
+      padding: 8px 10px;
+      border-radius: 4px;
+      box-shadow: 0 1px 5px rgba(0, 0, 0, 0.3);
+      max-height: 240px;
+      overflow-y: auto;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+    .legend-box h4 {
+      margin: 0 0 6px 0;
+      font-size: 13px;
+      font-weight: bold;
+    }
+    .legend-box .legend-title {
+      font-weight: bold;
+      margin-top: 6px;
+      margin-bottom: 2px;
+      font-size: 11px;
+    }
+    .legend-box img {
+      display: block;
+      max-width: 190px;
+      height: auto;
+    }
+
+    /* Koordinat Lat / Lng di kanan bawah */
+    .coord-box {
+      background: rgba(255, 255, 255, 0.9);
+      padding: 3px 8px;
+      border-radius: 3px;
+      border: 1px solid #bbb;
+      font-size: 11px;
+      color: #222;
+    }
+
+    /* Tombol Search di kanan atas */
+    .search-btn {
+      background: #fff;
+      width: 34px;
+      height: 34px;
+      border: 2px solid rgba(0, 0, 0, 0.2);
+      border-radius: 4px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 15px;
+      box-shadow: 0 1px 5px rgba(0, 0, 0, 0.25);
+    }
+    .search-btn:hover {
+      background: #f4f4f4;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <script>
+    const WMS_URL = "http://localhost:8080/geoserver/pgweb3/wms";
+    const WFS_URL = "http://localhost:8080/geoserver/pgweb3/ows";
+    const LAYER_ADMIN = "pgweb3:ADMINISTRASIDESA_AR_25K";
+    const LAYER_JALAN = "pgweb3:JALAN_LN_25K";
+
+    // 1. Inisialisasi map
+    const map = L.map("map", {
+      center: [-6.9175, 107.6191],
+      zoom: 12,
+      attributionControl: true
+    });
+
+    // 2. Basemap OpenStreetMap
+    const osm = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap"
+    }).addTo(map);
+
+    // 3. Layer WMS dari GeoServer
+    const adminLayer = L.tileLayer.wms(WMS_URL, {
+      layers: LAYER_ADMIN,
+      format: "image/png",
+      transparent: true,
+      version: "1.1.1",
+      attribution: "GeoServer"
+    }).addTo(map);
+
+    const jalanLayer = L.tileLayer.wms(WMS_URL, {
+      layers: LAYER_JALAN,
+      format: "image/png",
+      transparent: true,
+      version: "1.1.1",
+      attribution: "GeoServer"
+    }).addTo(map);
+
+    // 4. Auto-zoom ke bounding box layer administrasi via WFS
+    fetch(`${WFS_URL}?service=WFS&version=1.0.0&request=GetFeature&typeName=${encodeURIComponent(LAYER_ADMIN)}&maxFeatures=1&outputFormat=application/json`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.bbox && data.bbox.length === 4) {
+          const [minX, minY, maxX, maxY] = data.bbox;
+          map.fitBounds([[minY, minX], [maxY, maxX]]);
+        }
+      })
+      .catch(() => {});
+
+    // 5. Layer control di kanan atas
+    L.control.layers(
+      { "OpenStreetMap": osm },
+      {
+        "Administrasi Desa": adminLayer,
+        "Jalan": jalanLayer
+      },
+      { position: "topright" }
+    ).addTo(map);
+
+    // 6. Scale bar di kiri bawah
+    L.control.scale({ position: "bottomleft", metric: true, imperial: false }).addTo(map);
+
+    // 7. Legend otomatis dari GeoServer GetLegendGraphic
+    const legend = L.control({ position: "bottomleft" });
+    legend.onAdd = function () {
+      const div = L.DomUtil.create("div", "legend-box");
+      const legAdmin = `${WMS_URL}?REQUEST=GetLegendGraphic&VERSION=1.0.0&FORMAT=image/png&WIDTH=20&HEIGHT=20&LAYER=${encodeURIComponent(LAYER_ADMIN)}`;
+      const legJalan = `${WMS_URL}?REQUEST=GetLegendGraphic&VERSION=1.0.0&FORMAT=image/png&WIDTH=20&HEIGHT=20&LAYER=${encodeURIComponent(LAYER_JALAN)}`;
+
+      div.innerHTML = `
+        <h4>Legenda</h4>
+        <div class="legend-title">Administrasi Desa</div>
+        <img src="${legAdmin}" alt="Legenda Administrasi" />
+        <div class="legend-title">Jalan</div>
+        <img src="${legJalan}" alt="Legenda Jalan" />
+      `;
+      L.DomEvent.disableScrollPropagation(div);
+      return div;
+    };
+    legend.addTo(map);
+
+    // 8. Koordinat Lat / Lng di kanan bawah
+    const coordControl = L.control({ position: "bottomright" });
+    coordControl.onAdd = function () {
+      const div = L.DomUtil.create("div", "coord-box");
+      div.innerHTML = "Lat: 0.00000, Lng: 0.00000";
+      return div;
+    };
+    coordControl.addTo(map);
+
+    map.on("mousemove", function (e) {
+      coordControl.getContainer().innerHTML =
+        `Lat: ${e.latlng.lat.toFixed(5)}, Lng: ${e.latlng.lng.toFixed(5)}`;
+    });
+
+    // 9. Tombol Search wilayah via WFS
+    const searchControl = L.control({ position: "topright" });
+    searchControl.onAdd = function () {
+      const btn = L.DomUtil.create("button", "search-btn");
+      btn.type = "button";
+      btn.title = "Cari Wilayah";
+      btn.innerHTML = "🔍";
+      L.DomEvent.on(btn, "click", function (e) {
+        L.DomEvent.stopPropagation(e);
+        const keyword = prompt("Masukkan nama wilayah (NAMOBJ):");
+        if (!keyword) return;
+
+        const safeKeyword = keyword.replace(/'/g, "''");
+        const cql = encodeURIComponent(`NAMOBJ ILIKE '%${safeKeyword}%'`);
+        const url = `${WFS_URL}?service=WFS&version=1.0.0&request=GetFeature&typeName=${encodeURIComponent(LAYER_ADMIN)}&CQL_FILTER=${cql}&outputFormat=application/json`;
+
+        fetch(url)
+          .then((res) => res.json())
+          .then((data) => {
+            if (!data.features || data.features.length === 0) {
+              alert("Wilayah tidak ditemukan.");
+              return;
+            }
+            const layerTemp = L.geoJSON(data);
+            map.fitBounds(layerTemp.getBounds());
+            const props = data.features[0].properties;
+            const nama = props.NAMOBJ || props.namobj || "Hasil Pencarian";
+            L.popup()
+              .setLatLng(layerTemp.getBounds().getCenter())
+              .setContent(`<b>${nama}</b>`)
+              .openOn(map);
+          })
+          .catch(() => alert("Gagal mengambil data WFS."));
+      });
+      return btn;
+    };
+    searchControl.addTo(map);
+
+    // 10. Popup info atribut saat peta diklik (WMS GetFeatureInfo)
+    map.on("click", function (e) {
+      const size = map.getSize();
+      const bbox = map.getBounds().toBBoxString();
+      const point = map.latLngToContainerPoint(e.latlng);
+      const activeLayers = [LAYER_ADMIN, LAYER_JALAN].join(",");
+
+      const params = new URLSearchParams({
+        SERVICE: "WMS",
+        VERSION: "1.1.1",
+        REQUEST: "GetFeatureInfo",
+        LAYERS: activeLayers,
+        QUERY_LAYERS: activeLayers,
+        STYLES: "",
+        BBOX: bbox,
+        FEATURE_COUNT: "5",
+        HEIGHT: size.y,
+        WIDTH: size.x,
+        FORMAT: "image/png",
+        INFO_FORMAT: "application/json",
+        SRS: "EPSG:4326",
+        X: Math.round(point.x),
+        Y: Math.round(point.y)
+      });
+
+      fetch(`${WMS_URL}?${params.toString()}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (!data.features || data.features.length === 0) return;
+          const props = data.features[0].properties;
+          const nama = props.NAMOBJ || props.REMARK || Object.values(props).find((v) => v) || "Fitur";
+          L.popup()
+            .setLatLng(e.latlng)
+            .setContent(`<b>${nama}</b>`)
+            .openOn(map);
+        })
+        .catch(() => {});
+    });
+  </script>
+</body>
+</html>
